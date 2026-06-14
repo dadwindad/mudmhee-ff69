@@ -1,0 +1,63 @@
+@import "tailwindcss";
+
+/* ── Design tokens ─────────────────────────────────────── */
+:root {
+  --bg:           oklch(0.97 0.003 255);
+  --surface:      oklch(1 0 0);
+  --surface-2:    oklch(0.94 0.003 255);
+  --surface-3:    oklch(0.88 0.005 255);
+  --border:       rgba(0,0,0,0.07);
+  --border-mid:   rgba(0,0,0,0.13);
+  --canvas-bg:    oklch(0.92 0.004 255);
+  --ink:          oklch(0.13 0.01 265);
+  --ink-muted:    oklch(0.48 0.012 265);
+  --ink-faint:    oklch(0.72 0.008 265);
+  --accent:       oklch(0.54 0.245 15);
+  --accent-hi:    oklch(0.63 0.240 15);
+  --accent-dim:   oklch(0.96 0.04 15);
+  --accent-glow:  oklch(0.63 0.240 15 / 0.28);
+  --shadow-sm:    0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.05);
+  --shadow-md:    0 4px 16px rgba(0,0,0,0.10), 0 1px 3px rgba(0,0,0,0.06);
+  --shadow-lg:    0 8px 32px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.08);
+}
+
+[data-theme="dark"] {
+  --bg:           oklch(0.09 0.010 265);
+  --surface:      oklch(0.13 0.012 265);
+  --surface-2:    oklch(0.17 0.013 265);
+  --surface-3:    oklch(0.23 0.014 265);
+  --border:       rgba(255,255,255,0.06);
+  --border-mid:   rgba(255,255,255,0.12);
+  --canvas-bg:    oklch(0.07 0.007 265);
+  --ink:          oklch(0.95 0.005 70);
+  --ink-muted:    oklch(0.58 0.010 265);
+  --ink-faint:    oklch(0.34 0.008 265);
+  --accent:       oklch(0.68 0.230 15);
+  --accent-hi:    oklch(0.76 0.220 15);
+  --accent-dim:   oklch(0.21 0.080 15);
+  --accent-glow:  oklch(0.72 0.230 15 / 0.32);
+  --shadow-sm:    0 1px 3px rgba(0,0,0,0.35), 0 1px 2px rgba(0,0,0,0.20);
+  --shadow-md:    0 4px 16px rgba(0,0,0,0.45), 0 1px 3px rgba(0,0,0,0.25);
+  --shadow-lg:    0 8px 32px rgba(0,0,0,0.55), 0 2px 8px rgba(0,0,0,0.30);
+}
+
+/* ── Scrollbar ─────────────────────────────────────────── */
+* { scrollbar-width: thin; scrollbar-color: var(--surface-3) transparent; }
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--surface-3); border-radius: 4px; }
+
+/* ── Dot grid for canvas areas ─────────────────────────── */
+.dot-grid {
+  background-color: var(--canvas-bg);
+  background-image: radial-gradient(circle, var(--border-mid) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+/* ── Reduced motion ────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
