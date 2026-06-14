@@ -137,7 +137,7 @@ export default function SymmetryPreview({
   }, [paths, symmetry, cols, rows, offsetX, offsetY, showGrid, showSymmetryAxes, scale, rotation, width, height]);
 
   return (
-    <div ref={containerRef} className="w-full h-full relative">
+    <div ref={containerRef} style={{ position: 'absolute', inset: 0 }}>
       <canvas
         id="symmetry-preview-canvas"
         ref={canvasRef}

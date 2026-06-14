@@ -1097,7 +1097,7 @@ export default function App() {
                   {/* Canvas */}
                   <div
                     ref={wallpaperRef}
-                    className={`relative z-0 flex-1 min-h-0 rounded-2xl overflow-hidden dot-grid ${isPanMode ? (isDragging ? 'cursor-grabbing' : 'cursor-grab') : ''}`}
+                    className={`relative z-0 flex-1 min-h-[200px] rounded-2xl overflow-hidden dot-grid ${isPanMode ? (isDragging ? 'cursor-grabbing' : 'cursor-grab') : ''}`}
                     style={{ boxShadow: 'var(--shadow-md)', border: '1px solid var(--border)', touchAction: 'none' }}
                     onPointerDown={onPtrDown} onPointerMove={onPtrMove}
                     onPointerUp={onPtrUp}    onPointerCancel={onPtrUp} onPointerLeave={onPtrUp}
