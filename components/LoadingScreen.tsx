@@ -32,10 +32,10 @@ export default function LoadingScreen({ visible, message, progress = -1 }: Loadi
       {visible && (
         <motion.div
           key="loading-screen"
-          initial={{ opacity: 0 }}
+          initial={{ opacity: 1 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0, transition: { duration: 0.4, ease: 'easeInOut' } }}
-          transition={{ duration: 0.25 }}
+          transition={{ duration: 0 }}
           className="fixed inset-0 z-[9999] flex flex-col items-center justify-center gap-0"
           style={{ background: 'var(--bg)' }}
         >
@@ -69,8 +69,8 @@ export default function LoadingScreen({ visible, message, progress = -1 }: Loadi
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
-                src={`${process.env.NEXT_PUBLIC_BASE_PATH || ''}/images/sisin-logo.png`}
-                alt="Sisin"
+                src={`${process.env.NEXT_PUBLIC_BASE_PATH || ''}/mudmee-studio-favicon.svg`}
+                alt="Mudmee Studio"
                 width={96}
                 height={96}
                 style={{ objectFit: 'contain' }}

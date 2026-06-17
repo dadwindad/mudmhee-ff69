@@ -7,13 +7,14 @@ import {
   Hand, ZoomIn, ZoomOut, RotateCcw, RotateCw, RefreshCw,
   Search, Download as DownloadIcon, Crosshair, Undo, Redo,
   Printer, Sun, Moon, Grid, LayoutGrid, Eraser, Settings, Maximize2, Minimize2,
-  RectangleHorizontal, CheckCircle2, XCircle, Info, X,
+  RectangleHorizontal, CheckCircle2, XCircle, Info, X, FilePlus2,
 } from 'lucide-react';
 import MotifEditor from '../components/MotifEditor';
 import SymmetryPreview from '../components/SymmetryPreview';
 import AssembleView from '../components/AssembleView';
 import ThreePreview from '../components/ThreePreview';
 import LoadingScreen from '../components/LoadingScreen';
+import PrintModal from '../components/PrintModal';
 import { Path, SymmetryGroup, Metadata, Project, GalleryItem } from '../lib/types';
 import { v4 as uuidv4 } from 'uuid';
 import { applySymmetry } from '../lib/symmetry';
@@ -167,7 +168,9 @@ const STRINGS = {
     saved: 'Saved!', failedSave: 'Save failed', loaded: 'Loaded', invalidFile: 'Invalid file',
     confirmDelete: 'Delete this item?', confirmDeleteMsg: 'This action cannot be undone.',
     mathPrompt: 'Solve to confirm:', mathWrong: 'Incorrect answer, try again.',
-    cancel: 'Cancel',
+    cancel: 'Cancel', newProject: 'New',
+    confirmNew: 'Start new project?', confirmNewMsg: 'All unsaved changes will be lost.',
+    startNew: 'Start New',
     part: 'Part', mode: 'Draw Mode', overlay: 'Overlay',
   },
   th: {
@@ -196,7 +199,9 @@ const STRINGS = {
     saved: 'บันทึกแล้ว!', failedSave: 'บันทึกไม่สำเร็จ', loaded: 'โหลดแล้ว', invalidFile: 'ไฟล์ไม่ถูกต้อง',
     confirmDelete: 'ลบรายการนี้?', confirmDeleteMsg: 'การกระทำนี้ไม่สามารถย้อนกลับได้',
     mathPrompt: 'ตอบให้ถูกเพื่อยืนยัน:', mathWrong: 'คำตอบไม่ถูกต้อง ลองใหม่',
-    cancel: 'ยกเลิก',
+    cancel: 'ยกเลิก', newProject: 'ใหม่',
+    confirmNew: 'เริ่มโปรเจกต์ใหม่?', confirmNewMsg: 'การเปลี่ยนแปลงที่ยังไม่ได้บันทึกจะหายไป',
+    startNew: 'เริ่มใหม่',
     part: 'ส่วน', mode: 'โหมดวาด', overlay: 'ภาพต้นแบบ',
   },
 } as const;
@@ -351,7 +356,9 @@ export default function App() {
   const [lastPan,    setLastPan]    = useState({ x: 0, y: 0 });
   const [showGrid,   setShowGrid]   = useState(true);
   const [showAxes,   setShowAxes]   = useState(false);
-  const wallpaperRef = useRef<HTMLDivElement>(null);
+  const wallpaperRef   = useRef<HTMLDivElement>(null);
+  const gridMenuRef    = useRef<HTMLDivElement>(null);
+  const exportMenuRef  = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const el = wallpaperRef.current;
@@ -368,6 +375,18 @@ export default function App() {
   const [showGridMenu,   setShowGridMenu]   = useState(false);
   const [showSaveModal, setShowSaveModal]   = useState(false);
   const [pendingSaveType, setPendingSaveType] = useState<'body' | 'border' | 'assemble'>('body');
+  const [showNewModal,  setShowNewModal]    = useState(false);
+  const [showPrintModal, setShowPrintModal] = useState(false);
+
+  useEffect(() => {
+    if (!showGridMenu && !showExportMenu) return;
+    const handler = (e: MouseEvent) => {
+      if (showGridMenu   && gridMenuRef.current   && !gridMenuRef.current.contains(e.target as Node))   setShowGridMenu(false);
+      if (showExportMenu && exportMenuRef.current && !exportMenuRef.current.contains(e.target as Node)) setShowExportMenu(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showGridMenu, showExportMenu]);
 
   const onPtrDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (!isPanMode) return;
@@ -398,10 +417,49 @@ export default function App() {
 
   /* ── Toasts ── */
   const [toasts, setToasts] = useState<Toast[]>([]);
-  const showToast = (message: string, type: ToastType = 'info') => {
+
+  /* ── Resizable motif panel (desktop only) ── */
+  const [motifPanelWidth, setMotifPanelWidth] = useState(300);
+  const [isDesktop, setIsDesktop] = useState(false);
+  useEffect(() => {
+    const check = () => setIsDesktop(window.innerWidth >= 1024);
+    check();
+    window.addEventListener('resize', check);
+    return () => window.removeEventListener('resize', check);
+  }, []);
+  const onDividerPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = motifPanelWidth;
+    const onMove = (ev: PointerEvent) => {
+      const delta = ev.clientX - startX;
+      setMotifPanelWidth(Math.max(300, Math.min(600, startW + delta)));
+    };
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  };
+  const showToast = (message: string, type: ToastType = 'info', duration = 3500) => {
     const id = uuidv4();
     setToasts(t => [...t, { id, message, type }]);
-    setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), 3500);
+    setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), duration);
+  };
+
+  const handleNew = () => setShowNewModal(true);
+  const confirmNew = () => {
+    setShowNewModal(false);
+    setMetadata({ name: 'Untitled Mudmee', creator: '', description: '', geography: '' });
+    setColors(['#141414', '#e11d48', '#facc15', '#2563eb']);
+    setActiveColor('#141414');
+    setBodyHistory([[]]); setBodyStep(0);
+    setBorderHistory([[]]); setBorderStep(0);
+    setBodySymmetry('p3'); setBorderSymmetry('p111');
+    setBodyCols(15); setBodyRows(15);
+    setBorderCols(15); setBorderRows(15);
+    setMode('design'); setPart('body');
   };
 
   /* ── Gallery ── */
@@ -486,7 +544,8 @@ export default function App() {
       setBorderSymmetry(pd.border.symmetry); setBorderHistory([pd.border.paths]); setBorderStep(0);
       setBorderCols(pd.border.cols || 15);   setBorderRows(pd.border.rows || 15);
     }
-    showToast(cur.loaded, 'success');
+    showToast(cur.loaded, 'success', 500);
+    setMode('design');
   };
 
   /* ── JSON ── */
@@ -619,14 +678,24 @@ export default function App() {
           <motion.div
             animate={{ filter: `drop-shadow(0 0 8px var(--accent-glow))` }}
             transition={{ duration: 2, repeat: Infinity, repeatType: 'reverse', ease: 'easeInOut' }}
-            className="[&_svg]:w-5 [&_svg]:h-5 shrink-0"
-            style={{ color: 'var(--accent)' }}
+            className="shrink-0"
           >
-            <Layers />
+            <img src={`${process.env.NEXT_PUBLIC_BASE_PATH || ''}/mudmee-studio-favicon.svg`} alt="logo" style={{ width: 22, height: 22, display: 'block' }} />
           </motion.div>
           <span className="font-bold text-sm tracking-tight shrink-0" style={{ color: 'var(--ink)' }}>
             {cur.studio}
           </span>
+
+          <motion.button
+            onClick={handleNew}
+            whileTap={{ scale: 0.9 }}
+            title={cur.newProject}
+            className="h-7 px-2.5 flex items-center gap-1 rounded-lg text-xs font-semibold shrink-0 [&_svg]:w-3.5 [&_svg]:h-3.5"
+            style={{ background: 'var(--surface-2)', color: 'var(--ink-2)', border: '1px solid var(--border-mid)' }}
+          >
+            <FilePlus2 />
+            {cur.newProject}
+          </motion.button>
 
           <div className="w-px h-5 rounded-full shrink-0 mx-0.5" style={{ background: 'var(--border-mid)' }} />
 
@@ -771,12 +840,15 @@ export default function App() {
             {/* DESIGN */}
             {mode === 'design' && (
               <motion.div key="design" variants={fadeSlide} initial="hidden" animate="visible" exit="exit"
-                className="p-3 sm:p-4 lg:p-6 flex flex-col lg:flex-row gap-4 lg:gap-6 lg:items-stretch flex-1 min-h-0 overflow-y-auto lg:overflow-hidden"
+                className="p-3 sm:p-4 lg:p-6 flex flex-col lg:flex-row gap-4 lg:gap-0 lg:items-stretch flex-1 min-h-0 overflow-y-auto lg:overflow-hidden"
               >
                 {/* Motif editor */}
-                <div className="relative z-[20] flex flex-col gap-3 lg:w-[300px] lg:shrink-0">
-                  {/* Motif toolbar — centered, scrollable on mobile */}
-                  <div className="flex justify-center overflow-x-auto pb-0.5">
+                <div
+                  className="relative z-[20] flex flex-col gap-3 lg:shrink-0"
+                  style={isDesktop ? { width: motifPanelWidth } : undefined}
+                >
+                  {/* Motif toolbar — centered */}
+                  <div className="flex justify-center">
                     <div
                       className="flex items-center gap-0.5 p-0.5 rounded-2xl"
                       style={{
@@ -820,7 +892,7 @@ export default function App() {
                       ><Redo /></ToolBtn>
                       <Sep />
                       {/* Grid settings */}
-                      <div className="relative">
+                      <div className="relative" ref={gridMenuRef}>
                         <ToolBtn active={showGridMenu} onClick={() => setShowGridMenu(v => !v)} title={cur.gridSize}>
                           <Settings />
                         </ToolBtn>
@@ -868,7 +940,7 @@ export default function App() {
                     </div>
                   </div>
 
-                  <div className="rounded-2xl overflow-hidden dot-grid w-full aspect-square lg:w-[300px] lg:h-[300px] lg:aspect-auto"
+                  <div className="rounded-2xl overflow-hidden dot-grid w-full aspect-square"
                     style={{ boxShadow: 'var(--shadow-md)', border: '1px solid var(--border)' }}>
                     <MotifEditor
                       paths={part === 'body' ? bodyPaths : borderPaths}
@@ -881,9 +953,12 @@ export default function App() {
                     />
                   </div>
 
-                  {/* ── Below-canvas card ── */}
+                  {/* ── Below-canvas: palette + sponsor in flex-wrap row ── */}
+                  <div className="flex flex-wrap gap-3 items-start">
+
+                  {/* Palette card */}
                   <div
-                    className="rounded-2xl p-4 space-y-4"
+                    className="rounded-2xl p-4 space-y-4 flex-1 min-w-[220px]"
                     style={{
                       background: 'var(--surface)',
                       border: '1px solid var(--border)',
@@ -903,7 +978,7 @@ export default function App() {
                     </div>
 
                     {/* Palette swatches — circles */}
-                    <div className="flex items-center gap-2.5">
+                    <div className="flex items-center gap-2.5 flex-wrap">
                       {/* Eraser */}
                       <motion.button
                         onClick={() => setActiveColor('eraser')}
@@ -1008,9 +1083,9 @@ export default function App() {
 
                   </div>
 
-                  {/* ── Sponsor logos card ── */}
+                  {/* Sponsor logos card */}
                   <div
-                    className="rounded-2xl p-4"
+                    className="rounded-2xl p-4 flex-1 min-w-[140px]"
                     style={{
                       background: 'var(--surface)',
                       border: '1px solid var(--border)',
@@ -1018,20 +1093,42 @@ export default function App() {
                     }}
                   >
                     <SideLabel>{lang === 'th' ? 'ผู้ให้ทุน' : 'Funded by'}</SideLabel>
-                    <div className="mt-3 flex items-center justify-around gap-3">
+                    <div className="mt-3 flex items-center justify-around gap-2 flex-wrap">
                       {[
                         { src: 'LOGO-bru-227x300.png', alt: 'BRU' },
                         { src: 'emblem_brand_pg.png', alt: 'PG' },
                         { src: 'TSRI_Logo_(2021).svg', alt: 'TSRI' },
+                        { src: 'expo2026-logo.jpg', alt: 'Expo 2026' },
                       ].map(({ src, alt }) => (
                         <img
                           key={alt}
                           src={`${process.env.NEXT_PUBLIC_BASE_PATH || ''}/images/${src}`}
                           alt={alt}
-                          className="h-10 w-auto object-contain opacity-80 hover:opacity-100 transition-opacity"
+                          className="h-9 w-auto object-contain opacity-80 hover:opacity-100 transition-opacity"
                         />
                       ))}
                     </div>
+                  </div>
+
+                  </div>{/* end flex-wrap row */}
+                </div>
+
+                {/* Draggable divider — desktop only */}
+                <div
+                  className="hidden lg:flex items-center justify-center w-8 shrink-0 cursor-col-resize select-none z-[30]"
+                  onPointerDown={onDividerPointerDown}
+                >
+                  <div
+                    className="flex flex-col items-center justify-center gap-[3px] w-[18px] h-8 rounded-full transition-all duration-150 hover:scale-110 active:scale-95"
+                    style={{
+                      background: 'var(--surface)',
+                      border: '1px solid var(--border-mid)',
+                      boxShadow: 'var(--shadow-sm)',
+                    }}
+                  >
+                    {[0,1,2].map(i => (
+                      <div key={i} className="w-[3px] h-[3px] rounded-full" style={{ background: 'var(--ink-faint)' }} />
+                    ))}
                   </div>
                 </div>
 
@@ -1060,7 +1157,7 @@ export default function App() {
                     <ToolBtn active={showGrid}  onClick={() => setShowGrid(v  => !v)} title={cur.toggleGrid}><Grid /></ToolBtn>
                     <ToolBtn active={showAxes}  onClick={() => setShowAxes(v  => !v)} title={cur.toggleSymmetry}><Crosshair /></ToolBtn>
                     <Sep />
-                    <div className="relative">
+                    <div className="relative" ref={exportMenuRef}>
                       <ToolBtn onClick={() => setShowExportMenu(v => !v)} title={cur.exportPreview}><Printer /></ToolBtn>
                       <AnimatePresence>
                         {showExportMenu && (
@@ -1069,7 +1166,7 @@ export default function App() {
                             animate={{ opacity: 1, y: 0, scale: 1 }}
                             exit={{ opacity: 0, y: 4, scale: 0.96 }}
                             transition={{ duration: 0.15, ease: [0.16, 1, 0.3, 1] }}
-                            className="absolute left-0 top-full mt-2 rounded-2xl overflow-hidden z-20 min-w-[168px]"
+                            className="absolute right-0 top-full mt-2 rounded-2xl overflow-hidden z-20 min-w-[168px]"
                             style={{
                               background: `color-mix(in oklch, var(--surface) 90%, transparent)`,
                               backdropFilter: 'blur(16px)',
@@ -1084,9 +1181,17 @@ export default function App() {
                               {cur.exportFreehand}
                             </button>
                             <button onClick={() => exportPreview('grid')}
-                              className="w-full text-left px-4 py-3 text-sm font-medium transition-colors"
-                              style={{ color: 'var(--ink)' }}>
+                              className="w-full text-left px-4 py-3 text-sm font-medium transition-colors border-b"
+                              style={{ color: 'var(--ink)', borderColor: 'var(--border)' }}>
                               {cur.exportGrid}
+                            </button>
+                            <button
+                              onClick={() => { setShowExportMenu(false); setShowPrintModal(true); }}
+                              className="w-full text-left px-4 py-3 text-sm font-medium transition-colors flex items-center gap-2 [&_svg]:w-3.5 [&_svg]:h-3.5"
+                              style={{ color: 'var(--accent)' }}
+                            >
+                              <Printer />
+                              {lang === 'th' ? '2×3 นิ้ว (Xiaomi)' : '2×3 inch (Xiaomi)'}
                             </button>
                           </motion.div>
                         )}
@@ -1508,6 +1613,76 @@ export default function App() {
         })()}
       </AnimatePresence>
 
+      {/* ── New project confirm modal ── */}
+      <AnimatePresence>
+        {showNewModal && (
+          <>
+            <motion.div
+              key="new-backdrop"
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              transition={{ duration: 0.18 }}
+              className="fixed inset-0 z-40"
+              style={{ background: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)' }}
+              onClick={() => setShowNewModal(false)}
+            />
+            <div className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none">
+              <motion.div
+                key="new-panel"
+                initial={{ opacity: 0, scale: 0.95, y: 16 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.95, y: 16 }}
+                transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] as [number,number,number,number] }}
+                className="rounded-2xl overflow-hidden flex flex-col pointer-events-auto"
+                style={{
+                  width: 'min(320px, calc(100vw - 32px))',
+                  background: 'var(--surface)',
+                  border: '1px solid var(--border-mid)',
+                  boxShadow: 'var(--shadow-lg)',
+                }}
+              >
+                {/* Icon + title */}
+                <div className="px-6 pt-6 pb-4 flex flex-col items-center gap-3 text-center">
+                  <motion.div
+                    initial={{ scale: 0.7, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
+                    transition={{ delay: 0.06, type: 'spring', stiffness: 380, damping: 22 }}
+                    className="w-14 h-14 rounded-2xl flex items-center justify-center [&_svg]:w-7 [&_svg]:h-7"
+                    style={{ background: 'var(--surface-2)', color: 'var(--ink-2)', border: '1px solid var(--border-mid)' }}
+                  >
+                    <FilePlus2 />
+                  </motion.div>
+                  <div>
+                    <p className="text-sm font-bold" style={{ color: 'var(--ink)' }}>{cur.confirmNew}</p>
+                    <p className="text-xs mt-1" style={{ color: 'var(--ink-muted)' }}>{cur.confirmNewMsg}</p>
+                  </div>
+                </div>
+
+                {/* Actions */}
+                <div className="px-5 pb-5 flex gap-2">
+                  <motion.button
+                    onClick={() => setShowNewModal(false)} whileTap={{ scale: 0.96 }}
+                    className="flex-1 h-10 rounded-xl text-sm font-semibold border transition-colors"
+                    style={{ borderColor: 'var(--border-mid)', color: 'var(--ink-muted)' }}
+                  >
+                    {cur.cancel}
+                  </motion.button>
+                  <motion.button
+                    onClick={confirmNew} whileTap={{ scale: 0.96 }}
+                    className="flex-1 h-10 rounded-xl text-sm font-bold flex items-center justify-center gap-2 [&_svg]:w-4 [&_svg]:h-4"
+                    style={{
+                      background: 'var(--surface-2)',
+                      color: 'var(--ink)',
+                      border: '1px solid var(--border-mid)',
+                    }}
+                  >
+                    <FilePlus2 /> {cur.startNew}
+                  </motion.button>
+                </div>
+              </motion.div>
+            </div>
+          </>
+        )}
+      </AnimatePresence>
+
       {/* ── Mobile bottom nav ── */}
       <nav
         className="md:hidden fixed bottom-0 left-0 right-0 flex items-stretch border-t z-30"
@@ -1540,6 +1715,19 @@ export default function App() {
           );
         })}
       </nav>
+
+      {/* ── Print modal (2×3 inch) ── */}
+      <PrintModal
+        open={showPrintModal}
+        onClose={() => setShowPrintModal(false)}
+        paths={part === 'body' ? bodyPaths : borderPaths}
+        symmetry={part === 'body' ? bodySymmetry : borderSymmetry}
+        cols={currentCols}
+        rows={currentRows}
+        creator={metadata.creator}
+        lang={lang}
+        basePath={process.env.NEXT_PUBLIC_BASE_PATH || ''}
+      />
 
       {/* ── Toast container ── */}
       <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[9999] flex flex-col gap-2 items-center pointer-events-none">

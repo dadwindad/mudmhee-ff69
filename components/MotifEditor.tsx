@@ -32,12 +32,29 @@ export default function MotifEditor({
   width = 300,
   height = 300,
 }: MotifEditorProps) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [isDrawing, setIsDrawing] = useState(false);
+  const canvasRef    = useRef<HTMLCanvasElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [isDrawing, setIsDrawing]   = useState(false);
   const [currentPath, setCurrentPath] = useState<Path | null>(null);
+  const [displaySize, setDisplaySize] = useState(width);
 
-  const cellWidth = width / cols;
+  // Track actual rendered size so canvas resolution matches display
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(([entry]) => {
+      const w = Math.round(entry.contentRect.width);
+      if (w > 0) setDisplaySize(w);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  // logical cell sizes (for path coordinate space)
+  const cellWidth  = width  / cols;
   const cellHeight = height / rows;
+  // scale from logical → display pixels
+  const logicalScale = displaySize / width;
 
   const redraw = () => {
     const canvas = canvasRef.current;
@@ -45,13 +62,16 @@ export default function MotifEditor({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    ctx.clearRect(0, 0, width, height);
+    ctx.clearRect(0, 0, displaySize, displaySize);
 
     const allPaths = currentPath ? [...paths, currentPath] : paths;
 
-    // Placeholder text when canvas is empty
+    // Scale so all drawing uses logical coords (0–width, 0–height)
+    ctx.save();
+    ctx.scale(logicalScale, logicalScale);
+
+    // Placeholder when empty
     if (allPaths.length === 0) {
-      ctx.save();
       ctx.fillStyle = 'rgba(0,0,0,0.12)';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
@@ -59,10 +79,8 @@ export default function MotifEditor({
       ctx.fillText('Motif', width / 2, height / 2 - height * 0.07);
       ctx.font = `${Math.floor(height * 0.08)}px Kanit, sans-serif`;
       ctx.fillText('แม่ลาย', width / 2, height / 2 + height * 0.07);
-      ctx.restore();
     }
 
-    // Draw paths first so grid overlays them cleanly
     allPaths.forEach((path) => {
       if (path.points.length === 0) return;
 
@@ -94,20 +112,16 @@ export default function MotifEditor({
       } else {
         ctx.beginPath();
         ctx.moveTo(path.points[0].x, path.points[0].y);
-        for (let i = 1; i < path.points.length; i++) {
-          ctx.lineTo(path.points[i].x, path.points[i].y);
-        }
+        for (let i = 1; i < path.points.length; i++) ctx.lineTo(path.points[i].x, path.points[i].y);
         ctx.strokeStyle = path.color;
         ctx.lineWidth = path.width || 4;
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
-        ctx.stroke();
+        ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.stroke();
       }
     });
 
-    // Grid on top of paths
+    // Grid — 1 display pixel wide regardless of scale
     ctx.strokeStyle = 'rgba(0,0,0,0.1)';
-    ctx.lineWidth = 1;
+    ctx.lineWidth = 1 / logicalScale;
     for (let i = 0; i <= cols; i++) {
       ctx.beginPath(); ctx.moveTo(i * cellWidth, 0); ctx.lineTo(i * cellWidth, height); ctx.stroke();
     }
@@ -118,21 +132,22 @@ export default function MotifEditor({
     if (showSymmetryAxes) {
       drawSymmetryAxes(ctx, symmetry, width, height, width, height, 0, 0);
     }
+
+    ctx.restore();
   };
 
   useEffect(() => {
-    document.fonts.load(`bold ${Math.floor(height * 0.1)}px Kanit`).then(() => redraw());
-  }, [paths, currentPath, symmetry, cols, rows, tracingImage, showSymmetryAxes]);
+    document.fonts.load(`bold ${Math.floor(displaySize * 0.1)}px Kanit`).then(() => redraw());
+  }, [paths, currentPath, symmetry, cols, rows, tracingImage, showSymmetryAxes, displaySize]);
 
+  // Returns coordinates in logical space (0–width, 0–height)
   const getCoordinates = (e: React.PointerEvent<HTMLCanvasElement>): Point => {
     const canvas = canvasRef.current;
     if (!canvas) return { x: 0, y: 0 };
     const rect = canvas.getBoundingClientRect();
-    const scaleX = canvas.width / rect.width;
-    const scaleY = canvas.height / rect.height;
     return {
-      x: (e.clientX - rect.left) * scaleX,
-      y: (e.clientY - rect.top) * scaleY,
+      x: (e.clientX - rect.left) * (width  / rect.width),
+      y: (e.clientY - rect.top)  * (height / rect.height),
     };
   };
 
@@ -143,20 +158,9 @@ export default function MotifEditor({
     if (drawMode === 'pixel') {
       const col = Math.floor(point.x / cellWidth);
       const row = Math.floor(point.y / cellHeight);
-      setCurrentPath({
-        id: uuidv4(),
-        color: activeColor,
-        points: [{ x: col, y: row }],
-        type: 'pixel',
-      });
+      setCurrentPath({ id: uuidv4(), color: activeColor, points: [{ x: col, y: row }], type: 'pixel' });
     } else {
-      setCurrentPath({
-        id: uuidv4(),
-        color: activeColor,
-        points: [point],
-        type: 'freehand',
-        width: 4,
-      });
+      setCurrentPath({ id: uuidv4(), color: activeColor, points: [point], type: 'freehand', width: 4 });
     }
   };
 
@@ -167,20 +171,12 @@ export default function MotifEditor({
     if (drawMode === 'pixel') {
       const col = Math.floor(point.x / cellWidth);
       const row = Math.floor(point.y / cellHeight);
-      
-      // Only add if it's a new cell
-      const lastPoint = currentPath.points[currentPath.points.length - 1];
-      if (lastPoint.x !== col || lastPoint.y !== row) {
-        setCurrentPath((prev) => {
-          if (!prev) return null;
-          return { ...prev, points: [...prev.points, { x: col, y: row }] };
-        });
+      const last = currentPath.points[currentPath.points.length - 1];
+      if (last.x !== col || last.y !== row) {
+        setCurrentPath((prev) => prev ? { ...prev, points: [...prev.points, { x: col, y: row }] } : null);
       }
     } else {
-      setCurrentPath((prev) => {
-        if (!prev) return null;
-        return { ...prev, points: [...prev.points, point] };
-      });
+      setCurrentPath((prev) => prev ? { ...prev, points: [...prev.points, point] } : null);
     }
   };
 
@@ -193,11 +189,11 @@ export default function MotifEditor({
   };
 
   return (
-    <div className="w-full h-full">
+    <div ref={containerRef} className="w-full h-full">
       <canvas
         ref={canvasRef}
-        width={width}
-        height={height}
+        width={displaySize}
+        height={displaySize}
         style={{ display: 'block', width: '100%', height: '100%' }}
         className="bg-white cursor-crosshair touch-none"
         onPointerDown={handlePointerDown}
