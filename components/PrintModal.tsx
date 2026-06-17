@@ -30,6 +30,7 @@ interface PrintModalProps {
   creator?: string;
   lang: 'en' | 'th';
   basePath?: string;
+  onSendToQueue?: (imageDataUrl: string) => Promise<void>;
 }
 
 /* ─── helpers ─────────────────────────────────────────────── */
@@ -97,6 +98,7 @@ export default function PrintModal({
   creator = '',
   lang,
   basePath = '',
+  onSendToQueue,
 }: PrintModalProps) {
   /* ── wallpaper gesture state ── */
   const [pmZoom,    setPmZoom]    = useState(1);
@@ -298,32 +300,25 @@ export default function PrintModal({
     c.getContext('2d')!.clearRect(0, 0, c.width, c.height);
   };
 
-  /* ── download / print ── */
-  const handleDownload = async () => {
+  /* ── shared: render print canvas → data URL ── */
+  const renderPrintCanvas = async (): Promise<string> => {
     const out = document.createElement('canvas');
     out.width  = PRINT_W;
     out.height = PRINT_H;
     const ctx = out.getContext('2d')!;
 
-    // White background
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, PRINT_W, PRINT_H);
 
-    const wallH = Math.round(PRINT_H * 0.7);   // 630 px
-    const infoH = PRINT_H - wallH;             // 270 px
-    const halfW = PRINT_W / 2;                 // 300 px
+    const wallH = Math.round(PRINT_H * 0.7);
+    const infoH = PRINT_H - wallH;
+    const halfW = PRINT_W / 2;
     const pad   = 18;
 
-    /* ── Top: wallpaper ──
-       Scale all transform params from preview canvas → print canvas so the
-       downloaded image looks identical to the preview (same tile density,
-       same pan position, same rotation).  The preview card is 2:3 and the
-       print is also 2:3 at 70/30 split, so the ratio is the same for X & Y. */
     const previewW = wallSize.w || PRINT_W;
     const previewH = wallSize.h || wallH;
-    const pxScale = PRINT_W / previewW;
+    const pxScale  = PRINT_W / previewW;
     const printZoom    = pmZoom * pxScale;
-    // Correct offset: same fractional position of the pattern center in both canvases
     const printOffsetX = pmOffsetX + (PRINT_W - previewW) / 2;
     const printOffsetY = pmOffsetY + (wallH   - previewH) / 2;
 
@@ -338,7 +333,6 @@ export default function PrintModal({
     );
     ctx.restore();
 
-    /* ── helper: rounded rect path ── */
     const rrect = (x: number, y: number, w: number, h: number, r: number) => {
       ctx.beginPath();
       ctx.moveTo(x + r, y);
@@ -353,16 +347,13 @@ export default function PrintModal({
       ctx.closePath();
     };
 
-    /* ── Motif inset — top-left of wallpaper (rounded, proportional to preview) ── */
     {
       const S      = Math.round(INSET_PREVIEW * pxScale);
-      const ip     = Math.round(10 * pxScale);   // preview: div at top/left 6 + padding 4 = 10px
+      const ip     = Math.round(10 * pxScale);
       const border = Math.round(S * 0.07);
       const labelH = Math.round(S * 0.18);
       const outerR = Math.round(S * 0.12);
-      const innerR = 0;
 
-      // White card with shadow
       ctx.save();
       ctx.shadowColor = 'rgba(0,0,0,0.25)';
       ctx.shadowBlur  = 14;
@@ -372,7 +363,6 @@ export default function PrintModal({
       ctx.fill();
       ctx.restore();
 
-      // Motif rendered into temp canvas
       const mc = document.createElement('canvas');
       mc.width = S; mc.height = S;
       const mc2 = mc.getContext('2d')!;
@@ -384,7 +374,6 @@ export default function PrintModal({
       drawSymmetryAxes(mc2, symmetry, MOTIF_SIZE, MOTIF_SIZE, MOTIF_SIZE, MOTIF_SIZE, 0, 0);
       mc2.restore();
 
-      // Clip to rect before drawing motif
       ctx.save();
       ctx.beginPath();
       ctx.rect(ip, ip, S, S);
@@ -392,9 +381,7 @@ export default function PrintModal({
       ctx.drawImage(mc, ip, ip, S, S);
       ctx.restore();
 
-      // Label — gray background, black text
       const labelY = ip + S;
-      // Gray label bg — rounded bottom corners only
       const lblR = Math.round(outerR * 0.6);
       ctx.fillStyle = 'rgba(0,0,0,0.18)';
       ctx.beginPath();
@@ -413,20 +400,18 @@ export default function PrintModal({
       ctx.fillText(symmetry.toUpperCase(), ip + S / 2, labelY + labelH / 2 + 1);
     }
 
-    /* ── Dividers ── */
     ctx.strokeStyle = 'rgba(0,0,0,0.12)';
     ctx.lineWidth   = 1;
     ctx.beginPath(); ctx.moveTo(0, wallH); ctx.lineTo(PRINT_W, wallH); ctx.stroke();
     ctx.beginPath(); ctx.moveTo(halfW, wallH); ctx.lineTo(halfW, PRINT_H); ctx.stroke();
 
-    /* ── Bottom-left: slogan + logos ── */
     const logoH = infoH * 0.24;
     const logoY = PRINT_H - logoH - pad / 2;
 
     try {
       const slogan  = await loadImage(`${basePath}/images/event-slogan.png`);
       const maxW    = halfW - pad * 2;
-      const maxH    = logoY - wallH - pad; // fill all space above logo row
+      const maxH    = logoY - wallH - pad;
       const ratio   = Math.min(maxW / slogan.width, maxH / slogan.height);
       const dw = slogan.width * ratio, dh = slogan.height * ratio;
       ctx.drawImage(slogan, pad + (maxW - dw) / 2, wallH + pad / 2 + (maxH - dh) / 2, dw, dh);
@@ -442,7 +427,7 @@ export default function PrintModal({
     const results = await Promise.allSettled(SPONSOR_LOGOS.map(s => loadImage(`${basePath}/images/${s}`)));
     const logos   = results.flatMap(r => r.status === 'fulfilled' ? [r.value] : []);
     if (logos.length) {
-      const fixedH = logoH * 0.62; // uniform height for all logos
+      const fixedH = logoH * 0.62;
       const slotW  = (halfW - pad * 2) / logos.length;
       logos.forEach((img, i) => {
         const dh = fixedH;
@@ -453,7 +438,6 @@ export default function PrintModal({
       });
     }
 
-    /* ── Bottom-right: signature (redesigned) ── */
     const sigLabelFontH = Math.floor(infoH * 0.075);
     ctx.fillStyle = 'rgba(0,0,0,0.24)';
     ctx.font = `bold ${sigLabelFontH}px sans-serif`;
@@ -464,7 +448,6 @@ export default function PrintModal({
     const sigAreaBot = creator ? PRINT_H - pad / 2 - sigLabelFontH - 4 : PRINT_H - pad / 2;
     const sigH       = sigAreaBot - sigAreaTop;
 
-    // Light gray background + dashed rounded border
     const sigX = halfW + pad, sigW = halfW - pad * 2;
     const sigR = 10;
     rrect(sigX, sigAreaTop, sigW, sigH, sigR);
@@ -493,20 +476,39 @@ export default function PrintModal({
       ctx.fillText(creator, halfW + halfW / 2, PRINT_H - pad / 2);
     }
 
-    const url = out.toDataURL('image/png');
+    return out.toDataURL('image/png');
+  };
+
+  /* ── download / print ── */
+  const handleDownload = async () => {
+    const url = await renderPrintCanvas();
     const a   = document.createElement('a');
     a.href = url; a.download = 'mudmee-2x3in.png'; a.click();
   };
 
+  const [isSendingToQueue, setIsSendingToQueue] = useState(false);
+  const handleSendToQueue = async () => {
+    if (!onSendToQueue) return;
+    setIsSendingToQueue(true);
+    try {
+      const url = await renderPrintCanvas();
+      await onSendToQueue(url);
+    } finally {
+      setIsSendingToQueue(false);
+    }
+  };
+
   /* ── i18n ── */
   const t = {
-    title:    lang === 'th' ? 'พรีวิว 2×3 นิ้ว' : '2×3 inch Preview',
-    download: lang === 'th' ? 'ดาวน์โหลด PNG (2×3 นิ้ว)' : 'Download PNG (2×3 inch)',
-    sig:      lang === 'th' ? 'ลายเซน' : 'Signature',
-    clear:    lang === 'th' ? 'ล้าง' : 'Clear',
-    slogan:   lang === 'th' ? 'สโลแกนงาน' : 'Event Slogan',
-    hint:     lang === 'th' ? 'ลากเลื่อน · สองนิ้วย่อ/ขยาย/หมุน' : 'Drag to pan · Pinch/scroll to zoom',
-    sponsor:  lang === 'th' ? 'ผู้ให้ทุน' : 'Funded by',
+    title:       lang === 'th' ? 'พรีวิว 2×3 นิ้ว' : '2×3 inch Preview',
+    download:    lang === 'th' ? 'ดาวน์โหลด PNG (2×3 นิ้ว)' : 'Download PNG (2×3 inch)',
+    sendToQueue: lang === 'th' ? 'พิมพ์' : 'Print',
+    sending:     lang === 'th' ? 'กำลังส่ง…' : 'Sending…',
+    sig:         lang === 'th' ? 'ลายเซน' : 'Signature',
+    clear:       lang === 'th' ? 'ล้าง' : 'Clear',
+    slogan:      lang === 'th' ? 'สโลแกนงาน' : 'Event Slogan',
+    hint:        lang === 'th' ? 'ลากเลื่อน · สองนิ้วย่อ/ขยาย/หมุน' : 'Drag to pan · Pinch/scroll to zoom',
+    sponsor:     lang === 'th' ? 'ผู้ให้ทุน' : 'Funded by',
   };
 
   /* ── render ── */
@@ -752,20 +754,39 @@ export default function PrintModal({
                 </div>
               </div>
 
-              {/* Download button */}
-              <motion.button
-                onClick={handleDownload}
-                whileTap={{ scale: 0.95 }}
-                className="h-10 px-5 flex items-center gap-2 rounded-xl text-sm font-bold [&_svg]:w-4 [&_svg]:h-4"
-                style={{
-                  background: 'linear-gradient(135deg, var(--accent) 0%, var(--accent-hi) 100%)',
-                  color: 'white',
-                  boxShadow: '0 4px 20px var(--accent-glow)',
-                }}
-              >
-                <Printer />
-                {t.download}
-              </motion.button>
+              {/* Action buttons */}
+              <div className="flex gap-2 flex-wrap justify-center">
+                <motion.button
+                  onClick={handleDownload}
+                  whileTap={{ scale: 0.95 }}
+                  className="h-10 px-5 flex items-center gap-2 rounded-xl text-sm font-bold [&_svg]:w-4 [&_svg]:h-4"
+                  style={{
+                    background: 'linear-gradient(135deg, var(--accent) 0%, var(--accent-hi) 100%)',
+                    color: 'white',
+                    boxShadow: '0 4px 20px var(--accent-glow)',
+                  }}
+                >
+                  <Printer />
+                  {t.download}
+                </motion.button>
+
+                {onSendToQueue && (
+                  <motion.button
+                    onClick={handleSendToQueue}
+                    disabled={isSendingToQueue}
+                    whileTap={{ scale: isSendingToQueue ? 1 : 0.95 }}
+                    className="h-10 px-5 flex items-center gap-2 rounded-xl text-sm font-bold [&_svg]:w-4 [&_svg]:h-4 disabled:opacity-60"
+                    style={{
+                      background: 'rgba(255,255,255,0.18)',
+                      color: 'white',
+                      border: '1px solid rgba(255,255,255,0.3)',
+                    }}
+                  >
+                    <Printer />
+                    {isSendingToQueue ? t.sending : t.sendToQueue}
+                  </motion.button>
+                )}
+              </div>
             </motion.div>
             </div>
           </div>

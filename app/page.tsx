@@ -15,7 +15,7 @@ import AssembleView from '../components/AssembleView';
 import ThreePreview from '../components/ThreePreview';
 import LoadingScreen from '../components/LoadingScreen';
 import PrintModal from '../components/PrintModal';
-import { Path, SymmetryGroup, Metadata, Project, GalleryItem } from '../lib/types';
+import { Path, SymmetryGroup, Metadata, Project, GalleryItem, QueueItem } from '../lib/types';
 import { v4 as uuidv4 } from 'uuid';
 import { applySymmetry } from '../lib/symmetry';
 
@@ -144,7 +144,7 @@ const SegControl: React.FC<{
 const STRINGS = {
   en: {
     studio: 'Mudmee Studio',
-    design: 'Design', assemble: 'Assemble', preview: '3D', gallery: 'Gallery',
+    design: 'Design', assemble: 'Assemble', preview: '3D', gallery: 'Gallery', queue: 'Queue',
     body: 'Body', border: 'Border',
     freehand: 'Freehand', pixel: 'Pixel',
     symmetryGroup: 'Symmetry',
@@ -172,10 +172,12 @@ const STRINGS = {
     confirmNew: 'Start new project?', confirmNewMsg: 'All unsaved changes will be lost.',
     startNew: 'Start New',
     part: 'Part', mode: 'Draw Mode', overlay: 'Overlay',
+    printQueue: 'Print Queue', queueEmpty: 'No prints in queue.\nUse the Print button in the 2×3 preview.', downloadToDevice: 'Download',
+    sentToQueue: 'Sent to print queue!', failedQueue: 'Failed to send to queue',
   },
   th: {
     studio: 'มัดหมี่ สตูดิโอ',
-    design: 'ออกแบบ', assemble: 'ประกอบ', preview: '3D', gallery: 'แกลเลอรี',
+    design: 'ออกแบบ', assemble: 'ประกอบ', preview: '3D', gallery: 'แกลเลอรี', queue: 'คิว',
     body: 'ตัวผ้า', border: 'ตีนผ้า',
     freehand: 'อิสระ', pixel: 'ตาราง',
     symmetryGroup: 'สมมาตร',
@@ -203,10 +205,12 @@ const STRINGS = {
     confirmNew: 'เริ่มโปรเจกต์ใหม่?', confirmNewMsg: 'การเปลี่ยนแปลงที่ยังไม่ได้บันทึกจะหายไป',
     startNew: 'เริ่มใหม่',
     part: 'ส่วน', mode: 'โหมดวาด', overlay: 'ภาพต้นแบบ',
+    printQueue: 'คิวพิมพ์', queueEmpty: 'ยังไม่มีคิวพิมพ์\nกดปุ่มพิมพ์ในหน้าต่าง 2×3 นิ้ว', downloadToDevice: 'ดาวน์โหลด',
+    sentToQueue: 'ส่งเข้าคิวพิมพ์แล้ว!', failedQueue: 'ส่งเข้าคิวไม่สำเร็จ',
   },
 } as const;
 
-type Mode      = 'design' | 'assemble' | 'preview' | 'gallery';
+type Mode      = 'design' | 'assemble' | 'preview' | 'gallery' | 'queue';
 type Part      = 'body' | 'border';
 type Lang      = 'en' | 'th';
 type Theme     = 'light' | 'dark';
@@ -278,6 +282,7 @@ export default function App() {
       assemble: 'กำลังเตรียมโหมดประกอบผ้า…',
       preview:  'กำลังโหลดพรีวิว 3 มิติ…',
       gallery:  'กำลังโหลดแกลเลอรี…',
+      queue:    'กำลังโหลดคิวพิมพ์…',
     };
     setTabMessage(tabNames[m]);
     setTabLoading(true);
@@ -467,17 +472,21 @@ export default function App() {
   const [galleryTab,       setGalleryTab]        = useState<GalleryTab>('all');
   const [searchQuery,      setSearchQuery]       = useState('');
   const [deleteConfirmId,  setDeleteConfirmId]   = useState<string | null>(null);
+  const [deleteTarget,     setDeleteTarget]      = useState<'gallery' | 'queue'>('gallery');
   const [deleteMath,       setDeleteMath]         = useState<{ q: string; ans: number } | null>(null);
   const [mathInput,        setMathInput]          = useState('');
   const [mathWrong,        setMathWrong]          = useState(false);
 
-  const openDeleteConfirm = (id: string) => {
+  /* ── Queue ── */
+  const [queue, setQueue] = useState<QueueItem[]>([]);
+
+  const openDeleteConfirm = (id: string, target: 'gallery' | 'queue' = 'gallery') => {
     const a = Math.floor(Math.random() * 11);
     const b = Math.floor(Math.random() * 11);
     const plus = Math.random() < 0.5 || a < b;
     const [x, y, op] = plus ? [a, b, '+'] : [Math.max(a, b), Math.min(a, b), '−'];
     setDeleteMath({ q: `${x} ${op} ${y} =`, ans: op === '+' ? x + y : x - y });
-    setMathInput(''); setMathWrong(false); setDeleteConfirmId(id);
+    setMathInput(''); setMathWrong(false); setDeleteConfirmId(id); setDeleteTarget(target);
   };
 
   const closeDeleteConfirm = () => {
@@ -488,21 +497,21 @@ export default function App() {
     const MIN_MS = 1500;
     const base = process.env.NEXT_PUBLIC_BASE_PATH || '';
     setInitMessage('กำลังโหลดข้อมูลแกลเลอรี…');
-    fetch(`${base}/api/gallery`)
-      .then(r => r.json())
-      .then(d => {
-        if (Array.isArray(d)) setGallery(d);
-        setInitMessage('โหลดเสร็จแล้ว!');
-        setInitProgress(100);
-      })
-      .catch(() => {
-        setInitProgress(100);
-      })
-      .finally(() => {
-        const elapsed = Date.now() - initStartRef.current;
-        const wait    = Math.max(0, MIN_MS - elapsed);
-        setTimeout(() => setInitLoading(false), wait);
-      });
+    Promise.all([
+      fetch(`${base}/api/gallery`).then(r => r.json()).catch(() => []),
+      fetch(`${base}/api/queue`).then(r => r.json()).catch(() => []),
+    ]).then(([g, q]) => {
+      if (Array.isArray(g)) setGallery(g);
+      if (Array.isArray(q)) setQueue(q);
+      setInitMessage('โหลดเสร็จแล้ว!');
+      setInitProgress(100);
+    }).catch(() => {
+      setInitProgress(100);
+    }).finally(() => {
+      const elapsed = Date.now() - initStartRef.current;
+      const wait    = Math.max(0, MIN_MS - elapsed);
+      setTimeout(() => setInitLoading(false), wait);
+    });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -531,6 +540,30 @@ export default function App() {
     const base = process.env.NEXT_PUBLIC_BASE_PATH || '';
     const res = await fetch(`${base}/api/gallery/${id}`, { method: 'DELETE' });
     if (res.ok) setGallery(g => g.filter(i => i.id !== id));
+  };
+
+  const saveToQueue = async (imageDataUrl: string) => {
+    const base = process.env.NEXT_PUBLIC_BASE_PATH || '';
+    const newItem: QueueItem = {
+      id: uuidv4(),
+      image: imageDataUrl,
+      name: metadata.name || 'Untitled',
+      creator: metadata.creator || undefined,
+      date: new Date().toISOString(),
+    };
+    try {
+      const res = await fetch(`${base}/api/queue`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newItem),
+      });
+      if (res.ok) { setQueue(q => [newItem, ...q]); showToast(cur.sentToQueue, 'success'); }
+      else showToast(cur.failedQueue, 'error');
+    } catch { showToast(cur.failedQueue, 'error'); }
+  };
+
+  const deleteFromQueue = async (id: string) => {
+    const base = process.env.NEXT_PUBLIC_BASE_PATH || '';
+    const res = await fetch(`${base}/api/queue/${id}`, { method: 'DELETE' });
+    if (res.ok) setQueue(q => q.filter(i => i.id !== id));
   };
 
   const loadFromGallery = (item: GalleryItem) => {
@@ -736,7 +769,7 @@ export default function App() {
             className="flex items-center gap-0.5 p-1 rounded-2xl"
             style={{ background: 'var(--surface-2)' }}
           >
-            {(['design', 'assemble', 'preview', 'gallery'] as const).map(m => (
+            {(['design', 'assemble', 'preview', 'gallery', 'queue'] as const).map(m => (
               <button
                 key={m}
                 onClick={() => handleSetMode(m)}
@@ -1380,6 +1413,94 @@ export default function App() {
               </motion.div>
             )}
 
+            {/* QUEUE */}
+            {mode === 'queue' && (
+              <motion.div key="queue" variants={fadeSlide} initial="hidden" animate="visible" exit="exit"
+                className="p-6 flex flex-col gap-5 overflow-auto flex-1"
+              >
+                {/* Header */}
+                <div className="flex items-center gap-2 [&_svg]:w-5 [&_svg]:h-5">
+                  <Printer style={{ color: 'var(--accent)' }} />
+                  <h2 className="text-base font-bold" style={{ color: 'var(--ink)' }}>
+                    {cur.printQueue}
+                  </h2>
+                  {queue.length > 0 && (
+                    <span className="text-xs font-bold px-2 py-0.5 rounded-full"
+                      style={{ background: 'var(--accent-dim)', color: 'var(--accent)' }}>
+                      {queue.length}
+                    </span>
+                  )}
+                </div>
+
+                {queue.length === 0 ? (
+                  <div className="flex flex-col items-center gap-4 py-24 [&_svg]:w-14 [&_svg]:h-14">
+                    <Printer style={{ color: 'var(--ink-faint)' }} />
+                    <p className="text-sm text-center whitespace-pre-line" style={{ color: 'var(--ink-muted)' }}>
+                      {cur.queueEmpty}
+                    </p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+                    {queue.map(item => (
+                      <motion.div key={item.id}
+                        whileHover={{ y: -4, boxShadow: '0 12px 32px rgba(0,0,0,0.2)' }}
+                        transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+                        className="rounded-2xl overflow-hidden flex flex-col"
+                        style={{
+                          background: 'var(--surface)',
+                          border: '1px solid var(--border)',
+                          boxShadow: 'var(--shadow-sm)',
+                        }}
+                      >
+                        {/* 2×3 thumbnail */}
+                        <div className="relative overflow-hidden" style={{ aspectRatio: '2 / 3' }}>
+                          <img src={item.image} alt={item.name} className="w-full h-full object-cover" />
+                        </div>
+                        {/* Info + actions */}
+                        <div className="px-3 py-2.5 flex items-center justify-between gap-1.5">
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs font-semibold truncate" style={{ color: 'var(--ink)' }}>
+                              {item.name || '—'}
+                            </p>
+                            {item.creator && (
+                              <p className="text-[10px] truncate mt-0.5" style={{ color: 'var(--ink-muted)' }}>
+                                {item.creator}
+                              </p>
+                            )}
+                          </div>
+                          <div className="flex gap-1 shrink-0 [&_svg]:w-3.5 [&_svg]:h-3.5">
+                            <motion.button
+                              onClick={() => {
+                                const a = document.createElement('a');
+                                a.href = item.image;
+                                a.download = `${item.name || 'mudmee'}-2x3.png`;
+                                a.click();
+                              }}
+                              whileTap={{ scale: 0.88 }}
+                              className="h-7 px-2 text-[10px] font-semibold rounded-lg transition-colors flex items-center gap-1"
+                              style={{ background: 'var(--surface-2)', color: 'var(--ink)' }}
+                              title={cur.downloadToDevice}
+                            >
+                              <DownloadIcon /> {cur.downloadToDevice}
+                            </motion.button>
+                            <motion.button
+                              onClick={() => openDeleteConfirm(item.id, 'queue')}
+                              whileTap={{ scale: 0.88 }}
+                              className="w-7 h-7 flex items-center justify-center rounded-lg transition-colors"
+                              style={{ color: 'var(--accent)' }}
+                              title={cur.delete}
+                            >
+                              <Trash2 />
+                            </motion.button>
+                          </div>
+                        </div>
+                      </motion.div>
+                    ))}
+                  </div>
+                )}
+              </motion.div>
+            )}
+
           </AnimatePresence>
 
           {/* ThreePreview — always mounted to preserve WebGL state & selections */}
@@ -1502,10 +1623,13 @@ export default function App() {
       {/* ── Delete confirm modal ── */}
       <AnimatePresence>
         {deleteConfirmId && deleteMath && (() => {
-          const item = gallery.find(i => i.id === deleteConfirmId);
+          const galleryItem = gallery.find(i => i.id === deleteConfirmId);
+          const queueItem   = queue.find(i => i.id === deleteConfirmId);
+          const itemName    = deleteTarget === 'queue' ? queueItem?.name : galleryItem?.metadata.name;
           const handleConfirm = async () => {
             if (parseInt(mathInput, 10) !== deleteMath.ans) { setMathWrong(true); setMathInput(''); return; }
-            await deleteFromGallery(deleteConfirmId);
+            if (deleteTarget === 'queue') await deleteFromQueue(deleteConfirmId);
+            else await deleteFromGallery(deleteConfirmId);
             closeDeleteConfirm();
           };
           return (
@@ -1541,9 +1665,9 @@ export default function App() {
                   </div>
                   <div>
                     <p className="text-sm font-bold" style={{ color: 'var(--ink)' }}>{cur.confirmDelete}</p>
-                    {item?.metadata.name && (
+                    {itemName && (
                       <p className="text-xs mt-1 font-semibold truncate max-w-[240px]" style={{ color: 'var(--accent)' }}>
-                        "{item.metadata.name}"
+                        "{itemName}"
                       </p>
                     )}
                     <p className="text-xs mt-1" style={{ color: 'var(--ink-muted)' }}>{cur.confirmDeleteMsg}</p>
@@ -1695,12 +1819,13 @@ export default function App() {
           paddingBottom: 'env(safe-area-inset-bottom)',
         }}
       >
-        {(['design', 'assemble', 'preview', 'gallery'] as const).map(m => {
+        {(['design', 'assemble', 'preview', 'gallery', 'queue'] as const).map(m => {
           const icons: Record<typeof m, React.ReactNode> = {
             design:   <PenTool />,
             assemble: <Layers />,
             preview:  <Box />,
             gallery:  <LayoutGrid />,
+            queue:    <Printer />,
           };
           return (
             <button
@@ -1727,6 +1852,7 @@ export default function App() {
         creator={metadata.creator}
         lang={lang}
         basePath={process.env.NEXT_PUBLIC_BASE_PATH || ''}
+        onSendToQueue={saveToQueue}
       />
 
       {/* ── Toast container ── */}

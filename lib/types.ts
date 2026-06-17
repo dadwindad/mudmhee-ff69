@@ -51,3 +51,11 @@ export type GalleryItem = {
   projectData: Project;
 };
 
+export type QueueItem = {
+  id: string;
+  image: string;   // base64 PNG (2×3 print)
+  name: string;
+  creator?: string;
+  date: string;
+};
+
