@@ -397,7 +397,7 @@ export default function PrintModal({
       ctx.font = `bold ${Math.round(labelH * 0.68)}px monospace`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText(symmetry.toUpperCase(), ip + S / 2, labelY + labelH / 2 + 1);
+      ctx.fillText(symmetry, ip + S / 2, labelY + labelH / 2 + 1);
     }
 
     ctx.strokeStyle = 'rgba(0,0,0,0.12)';
@@ -611,7 +611,7 @@ export default function PrintModal({
                       fontWeight: 800,
                       letterSpacing: '0.07em',
                       color: '#000000',
-                      textTransform: 'uppercase',
+                      textTransform: 'none',
                       marginTop: 0,
                       lineHeight: 1,
                       background: 'rgba(0,0,0,0.18)',
